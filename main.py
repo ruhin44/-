@@ -10,14 +10,11 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filte
 TOKEN = os.environ.get('TOKEN')
 PORT = int(os.environ.get('PORT', 10000))
 
-# ১. রেন্ডারের পোর্ট ওপেন রাখার জন্য একটি মিনি ওয়েব সার্ভার (থ্রেডে চলবে)
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print(f"Dummy web server running on port {PORT}")
         httpd.serve_forever()
 
-# ২. ট্র্যাকিং ফাংশন
 async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cn_number = update.message.text.strip()
     
@@ -32,7 +29,6 @@ async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Referer': 'https://operation.sundarbancourierltd.com/'
         }
 
@@ -50,33 +46,37 @@ async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            page_text = soup.get_text(separator='\n')
-            lines = [line.strip() for line in page_text.splitlines() if line.strip()]
-            clean_text = '\n'.join(lines)
+            # শুধুমাত্র ওয়েবসাইটের টেবিলগুলো থেকে ডেটা ফিল্টার করা
+            tables = soup.find_all('table')
+            extracted_data = []
 
-            if len(clean_text) > 3800:
-                clean_text = clean_text[:3800] + "\n\n...[বাকি অংশ কাটা হয়েছে]"
+            for table in tables:
+                rows = table.find_all('tr')
+                for row in rows:
+                    cols = row.find_all(['td', 'th'])
+                    cols_text = [ele.text.strip() for ele in cols if ele.text.strip()]
+                    if cols_text:
+                        extracted_data.append(" : ".join(cols_text))
 
-            if len(clean_text) < 30:
-                await update.message.reply_text("ওয়েবসাইট থেকে কোনো তথ্য পাওয়া যায়নি।")
+            if extracted_data:
+                clean_result = "\n".join(extracted_data)
+                await update.message.reply_text(f"📦 **পার্সেলের রিয়েল-টাইম আপডেট:**\n\n{clean_result}")
             else:
-                await update.message.reply_text(f"📄 **ওয়েবসাইট থেকে পাওয়া রেসপন্স:**\n\n{clean_text}")
+                await update.message.reply_text("দুঃখিত, এই ট্র্যাকিং নম্বরের কোনো আপডেট পাওয়া যায়নি। সঠিক নম্বর দিয়েছেন কি না চেক করুন।")
         else:
-            await update.message.reply_text(f"সার্ভার সাড়া দিচ্ছে না। Error Status Code: {response.status_code}")
+            await update.message.reply_text("সার্ভার থেকে সঠিক ডেটা পাওয়া যায়নি।")
 
     except Exception as e:
-        await update.message.reply_text(f"এরর দেখা দিয়েছে: {str(e)}")
+        await update.message.reply_text(f"টেকনিক্যাল সমস্যার কারণে খোঁজ করা সম্ভব হয়নি।")
 
 def main():
     if not TOKEN:
         print("Error: Telegram Bot Token is missing!")
         return
 
-    # মিনি ওয়েব সার্ভার আলাদা থ্রেডে চালু করা (যাতে রেন্ডার পোর্ট ওপেন পায়)
     server_thread = threading.Thread(target=run_dummy_server, daemon=True)
     server_thread.start()
 
-    # টেলিগ্রাম বট স্টার্ট করা
     application = ApplicationBuilder().token(TOKEN).build()
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), track_parcel))
 
