@@ -1,11 +1,23 @@
 import os
+import http.server
+import socketserver
+import threading
 import requests
 from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
 TOKEN = os.environ.get('TOKEN')
+PORT = int(os.environ.get('PORT', 10000))
 
+# ১. রেন্ডারের পোর্ট ওপেন রাখার জন্য একটি মিনি ওয়েব সার্ভার (থ্রেডে চলবে)
+def run_dummy_server():
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"Dummy web server running on port {PORT}")
+        httpd.serve_forever()
+
+# ২. ট্র্যাকিং ফাংশন
 async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cn_number = update.message.text.strip()
     
@@ -16,7 +28,6 @@ async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🔍 ট্র্যাকিং নম্বর `{cn_number}` এর তথ্য খোঁজা হচ্ছে...")
 
     try:
-        # সঠিক অপারেশানাল লিংক
         url = "https://operation.sundarbancourierltd.com/"
 
         headers = {
@@ -25,31 +36,24 @@ async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'Referer': 'https://operation.sundarbancourierltd.com/'
         }
 
-        # ট্র্যাকিং ফর্মে যা সাবমিট হয়
         payload = {
             'search_type': 'CN Number',
-            'date_range': 'Last 7 days', # অথবা 'all' / প্রয়োজনীয় টাইমফ্রেম
+            'date_range': 'Last 7 days',
             'search_value': cn_number,
             'cn': cn_number
         }
 
         session = requests.Session()
-        
-        # প্রথমে পেজ ভিজিট করা (কুকিজ সেটআপের জন্য)
         session.get(url, headers=headers, timeout=10)
-        
-        # পোস্ট রিকোয়েস্ট পাঠানো
         response = session.post(url, data=payload, headers=headers, timeout=15)
 
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # পেজের সমস্ত পরিষ্কার টেক্সট সংগ্রহ করা
             page_text = soup.get_text(separator='\n')
             lines = [line.strip() for line in page_text.splitlines() if line.strip()]
             clean_text = '\n'.join(lines)
 
-            # টেক্সট সাইজ টেলিকম মেসেজ লিমিটে নিয়ে আসা
             if len(clean_text) > 3800:
                 clean_text = clean_text[:3800] + "\n\n...[বাকি অংশ কাটা হয়েছে]"
 
@@ -68,6 +72,11 @@ def main():
         print("Error: Telegram Bot Token is missing!")
         return
 
+    # মিনি ওয়েব সার্ভার আলাদা থ্রেডে চালু করা (যাতে রেন্ডার পোর্ট ওপেন পায়)
+    server_thread = threading.Thread(target=run_dummy_server, daemon=True)
+    server_thread.start()
+
+    # টেলিগ্রাম বট স্টার্ট করা
     application = ApplicationBuilder().token(TOKEN).build()
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), track_parcel))
 
