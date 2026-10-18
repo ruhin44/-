@@ -3,7 +3,6 @@ import http.server
 import socketserver
 import threading
 import requests
-from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
@@ -22,52 +21,57 @@ async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("দয়া করে সঠিক সুন্দরবন কুরিয়ারের ট্র্যাকিং (CN) নম্বর দিন।")
         return
 
-    await update.message.reply_text(f"🔍 ট্র্যাকিং নম্বর `{cn_number}` এর তথ্য খোঁজা হচ্ছে...")
+    await update.message.reply_text(f"🔍 ট্র্যাকিং নম্বর `{cn_number}` এর রিয়েল-টাইম ডাটা খোঁজা হচ্ছে...")
 
     try:
-        url = "https://operation.sundarbancourierltd.com/"
+        api_url = "https://operation.sundarbancourierltd.com/Home/getDatabyCN"
 
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Host': 'operation.sundarbancourierltd.com',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-T595 Build/QP1A.190711.020) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.8037.107 Safari/537.36',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Content-Type': 'application/json;charset=UTF-8',
+            'Origin': 'https://operation.sundarbancourierltd.com',
+            'X-Requested-With': 'XMLHttpRequest',
+            'key': 'CzbZcWnwf7TNTzluD9rxyXCUqzN4xOhs',
             'Referer': 'https://operation.sundarbancourierltd.com/'
         }
 
         payload = {
-            'search_type': 'CN Number',
-            'date_range': 'Last 7 days',
-            'search_value': cn_number,
-            'cn': cn_number
+            "selectedtypes": "cnno",
+            "selectedtimes": "7",
+            "inputvalue": cn_number
         }
 
-        session = requests.Session()
-        session.get(url, headers=headers, timeout=10)
-        response = session.post(url, data=payload, headers=headers, timeout=15)
+        response = requests.post(api_url, json=payload, headers=headers, timeout=15)
 
         if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
+            res_data = response.json()
             
-            # শুধুমাত্র ওয়েবসাইটের টেবিলগুলো থেকে ডেটা ফিল্টার করা
-            tables = soup.find_all('table')
-            extracted_data = []
+            if res_data:
+                text_output = f"📦 **সুন্দরবন কুরিয়ার ট্র্যাকিং রিপোর্ট (CN: {cn_number}):**\n\n"
+                
+                # যদি রেসপন্সটি লিস্ট বা ডিকশনারি হয় সে অনুযায়ী সুন্দরভাবে সাজানো
+                items = res_data if isinstance(res_data, list) else [res_data]
+                
+                for idx, item in enumerate(items, 1):
+                    if isinstance(item, dict):
+                        for key, value in item.items():
+                            if value:  # শুধু যেগুলোর মান আছে তা দেখাবে
+                                formatted_key = key.replace('_', ' ').capitalize()
+                                text_output += f"• **{formatted_key}:** {value}\n"
+                        text_output += "-------------------\n"
+                    else:
+                        text_output += f"• {item}\n"
 
-            for table in tables:
-                rows = table.find_all('tr')
-                for row in rows:
-                    cols = row.find_all(['td', 'th'])
-                    cols_text = [ele.text.strip() for ele in cols if ele.text.strip()]
-                    if cols_text:
-                        extracted_data.append(" : ".join(cols_text))
-
-            if extracted_data:
-                clean_result = "\n".join(extracted_data)
-                await update.message.reply_text(f"📦 **পার্সেলের রিয়েল-টাইম আপডেট:**\n\n{clean_result}")
+                await update.message.reply_text(text_output, parse_mode='Markdown')
             else:
-                await update.message.reply_text("দুঃখিত, এই ট্র্যাকিং নম্বরের কোনো আপডেট পাওয়া যায়নি। সঠিক নম্বর দিয়েছেন কি না চেক করুন।")
+                await update.message.reply_text("দুঃখিত, এই ট্র্যাকিং নম্বরের বিপরীতে কোনো ডাটা পাওয়া যায়নি। সঠিক নম্বর দিয়েছেন কি না চেক করুন।")
         else:
-            await update.message.reply_text("সার্ভার থেকে সঠিক ডেটা পাওয়া যায়নি।")
+            await update.message.reply_text(f"সার্ভার ত্রুটি কোড: {response.status_code}")
 
     except Exception as e:
-        await update.message.reply_text(f"টেকনিক্যাল সমস্যার কারণে খোঁজ করা সম্ভব হয়নি।")
+        await update.message.reply_text(f"টেকনিক্যাল সমস্যার কারণে খোঁজ করা সম্ভব হয়নি: {str(e)}")
 
 def main():
     if not TOKEN:
