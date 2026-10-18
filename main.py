@@ -21,11 +21,13 @@ async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("দয়া করে সঠিক সুন্দরবন কুরিয়ারের ট্র্যাকিং (CN) নম্বর দিন।")
         return
 
-    await update.message.reply_text(f"🔍 ট্র্যাকিং নম্বর `{cn_number}` এর রিয়েল-টাইম ডাটা খোঁজা হচ্ছে...")
+    await update.message.reply_text(f"🔍 ট্র্যাকিং নম্বর `{cn_number}` এর রিয়েল-টাইম ডাটা আনা হচ্ছে...")
 
     try:
+        # আপনার খুঁজে বের করা আসল এপিআই লিংক
         api_url = "https://operation.sundarbancourierltd.com/Home/getDatabyCN"
 
+        # আপনার দেওয়া সঠিক হেডার্স এবং কাস্টম কী (Key)
         headers = {
             'Host': 'operation.sundarbancourierltd.com',
             'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-T595 Build/QP1A.190711.020) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.8037.107 Safari/537.36',
@@ -37,36 +39,26 @@ async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'Referer': 'https://operation.sundarbancourierltd.com/'
         }
 
+        # আপনি যে পেলোড বা বডি বের করেছেন
         payload = {
             "selectedtypes": "cnno",
             "selectedtimes": "7",
             "inputvalue": cn_number
         }
 
+        # সরাসরি JSON এপিআইতে POST রিকোয়েস্ট পাঠানো
         response = requests.post(api_url, json=payload, headers=headers, timeout=15)
 
         if response.status_code == 200:
             res_data = response.json()
             
             if res_data:
-                text_output = f"📦 **সুন্দরবন কুরিয়ার ট্র্যাকিং রিপোর্ট (CN: {cn_number}):**\n\n"
-                
-                # যদি রেসপন্সটি লিস্ট বা ডিকশনারি হয় সে অনুযায়ী সুন্দরভাবে সাজানো
-                items = res_data if isinstance(res_data, list) else [res_data]
-                
-                for idx, item in enumerate(items, 1):
-                    if isinstance(item, dict):
-                        for key, value in item.items():
-                            if value:  # শুধু যেগুলোর মান আছে তা দেখাবে
-                                formatted_key = key.replace('_', ' ').capitalize()
-                                text_output += f"• **{formatted_key}:** {value}\n"
-                        text_output += "-------------------\n"
-                    else:
-                        text_output += f"• {item}\n"
-
+                # ডেটা সুন্দরভাবে সাজিয়ে পাঠানোর জন্য ফরম্যাট করা
+                # (রেসপন্স জেসন ফরম্যাট অনুযায়ী ফিল্ডগুলো সাজানো যাবে)
+                text_output = f"📦 **সুন্দরবন কুরিয়ার ট্র্যাকিং রিপোর্ট:**\n\n```json\n{res_data}\n```"
                 await update.message.reply_text(text_output, parse_mode='Markdown')
             else:
-                await update.message.reply_text("দুঃখিত, এই ট্র্যাকিং নম্বরের বিপরীতে কোনো ডাটা পাওয়া যায়নি। সঠিক নম্বর দিয়েছেন কি না চেক করুন।")
+                await update.message.reply_text("দুঃখিত, এই ট্র্যাকিং নম্বরের বিপরীতে কোনো ডাটা পাওয়া যায়নি।")
         else:
             await update.message.reply_text(f"সার্ভার ত্রুটি কোড: {response.status_code}")
 
