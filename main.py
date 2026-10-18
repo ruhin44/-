@@ -2,6 +2,7 @@ import os
 import http.server
 import socketserver
 import threading
+import json
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
@@ -21,13 +22,11 @@ async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("দয়া করে সঠিক সুন্দরবন কুরিয়ারের ট্র্যাকিং (CN) নম্বর দিন।")
         return
 
-    await update.message.reply_text(f"🔍 ট্র্যাকিং নম্বর `{cn_number}` এর রিয়েল-টাইম ডাটা আনা হচ্ছে...")
+    await update.message.reply_text(f"🔍 ট্র্যাকিং নম্বর `{cn_number}` এর ডাটা সংগ্রহ করে ফাইল তৈরি করা হচ্ছে...")
 
     try:
-        # আপনার খুঁজে বের করা আসল এপিআই লিংক
         api_url = "https://operation.sundarbancourierltd.com/Home/getDatabyCN"
 
-        # আপনার দেওয়া সঠিক হেডার্স এবং কাস্টম কী (Key)
         headers = {
             'Host': 'operation.sundarbancourierltd.com',
             'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-T595 Build/QP1A.190711.020) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.8037.107 Safari/537.36',
@@ -39,24 +38,37 @@ async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'Referer': 'https://operation.sundarbancourierltd.com/'
         }
 
-        # আপনি যে পেলোড বা বডি বের করেছেন
         payload = {
             "selectedtypes": "cnno",
             "selectedtimes": "7",
             "inputvalue": cn_number
         }
 
-        # সরাসরি JSON এপিআইতে POST রিকোয়েস্ট পাঠানো
         response = requests.post(api_url, json=payload, headers=headers, timeout=15)
 
         if response.status_code == 200:
-            res_data = response.json()
+            try:
+                res_data = response.json()
+            except:
+                res_data = {"raw_response": response.text}
             
             if res_data:
-                # ডেটা সুন্দরভাবে সাজিয়ে পাঠানোর জন্য ফরম্যাট করা
-                # (রেসপন্স জেসন ফরম্যাট অনুযায়ী ফিল্ডগুলো সাজানো যাবে)
-                text_output = f"📦 **সুন্দরবন কুরিয়ার ট্র্যাকিং রিপোর্ট:**\n\n```json\n{res_data}\n```"
-                await update.message.reply_text(text_output, parse_mode='Markdown')
+                # জেসন ডেটা দিয়ে একটি ফাইল তৈরি করা
+                file_name = f"tracking_{cn_number}.json"
+                with open(file_name, "w", encoding="utf-8") as f:
+                    json.dump(res_data, f, ensure_ascii=False, indent=4)
+
+                # টেলিগ্রামে ফাইলটি ডকুমেন্ট হিসেবে পাঠিয়ে দেওয়া
+                with open(file_name, "rb") as f:
+                    await update.message.reply_document(
+                        document=f,
+                        filename=file_name,
+                        caption=f"📦 **CN Number:** `{cn_number}`\nসম্পূর্ণ ট্র্যাকিং ডাটা জেসন ফাইলে দেওয়া হলো।"
+                    )
+
+                # লোকাল ফাইল মুছে ফেলা
+                if os.path.exists(file_name):
+                    os.remove(file_name)
             else:
                 await update.message.reply_text("দুঃখিত, এই ট্র্যাকিং নম্বরের বিপরীতে কোনো ডাটা পাওয়া যায়নি।")
         else:
