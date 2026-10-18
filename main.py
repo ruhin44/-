@@ -2,7 +2,6 @@ import os
 import http.server
 import socketserver
 import threading
-import json
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
@@ -22,7 +21,7 @@ async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("দয়া করে সঠিক সুন্দরবন কুরিয়ারের ট্র্যাকিং (CN) নম্বর দিন।")
         return
 
-    await update.message.reply_text(f"🔍 ট্র্যাকিং নম্বর `{cn_number}` এর ডাটা সংগ্রহ করে ফাইল তৈরি করা হচ্ছে...")
+    await update.message.reply_text(f"🔍 ট্র্যাকিং নম্বর `{cn_number}` এর তথ্য খোঁজা হচ্ছে...")
 
     try:
         api_url = "https://operation.sundarbancourierltd.com/Home/getDatabyCN"
@@ -47,30 +46,50 @@ async def track_parcel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = requests.post(api_url, json=payload, headers=headers, timeout=15)
 
         if response.status_code == 200:
-            try:
-                res_data = response.json()
-            except:
-                res_data = {"raw_response": response.text}
+            res_data = response.json()
             
-            if res_data:
-                # জেসন ডেটা দিয়ে একটি ফাইল তৈরি করা
-                file_name = f"tracking_{cn_number}.json"
-                with open(file_name, "w", encoding="utf-8") as f:
-                    json.dump(res_data, f, ensure_ascii=False, indent=4)
+            if res_data and isinstance(res_data, list) and len(res_data) > 0:
+                item = res_data[0]
+                
+                cn = item.get('cnNumber', cn_number)
+                status = item.get('status', 'N/A')
+                item_desc = item.get('itemDescription', 'N/A')
+                booking_from = item.get('bookingBranch', 'N/A')
+                destination = item.get('destBranch', 'N/A')
+                booking_date = item.get('bookingDate', '').split('T')[0] if item.get('bookingDate') else 'N/A'
+                
+                # সুন্দরভাবে সাজানো মেসেজ ফরম্যাট
+                msg = f"📦 **সুন্দরবন কুরিয়ার ট্র্যাকিং রিপোর্ট**\n\n"
+                msg += f"🔹 **CN Number:** `{cn}`\n"
+                msg += f"🛍️ **আইটেম:** {item_desc}\n"
+                msg += f"🚩 **বুকিং শাখা:** {booking_from}\n"
+                msg += f"🏁 **গন্তব্য শাখা:** {destination}\n"
+                msg += f"📅 **বুকিং তারিখ:** {booking_date}\n"
+                msg += f"📌 **বর্তমান স্ট্যাটাস:** `{status}`\n\n"
+                msg += f"📜 **ট্র্যাকিং হিস্ট্রি:**\n"
+                
+                status_list = item.get('cnStatusList', [])
+                for s in status_list:
+                    s_date = s.get('statusDate', '')
+                    s_date_str = s_date.split('T')[0] if s_date else ''
+                    s_status = s.get('status', '')
+                    sub_branch = s.get('fromSubBranch', '') or s.get('downloadSubBranchName', '')
+                    remarks = s.get('remarks', '')
+                    
+                    msg += f"• `{s_date_str}` — **{s_status}**"
+                    if sub_branch:
+                        msg += f" ({sub_branch})"
+                    if remarks:
+                        msg += f" [{remarks}]"
+                    msg += "\n"
 
-                # টেলিগ্রামে ফাইলটি ডকুমেন্ট হিসেবে পাঠিয়ে দেওয়া
-                with open(file_name, "rb") as f:
-                    await update.message.reply_document(
-                        document=f,
-                        filename=file_name,
-                        caption=f"📦 **CN Number:** `{cn_number}`\nসম্পূর্ণ ট্র্যাকিং ডাটা জেসন ফাইলে দেওয়া হলো।"
-                    )
+                # টেলিগ্রামের মেসেজ লিমিট (৪০০০ ক্যারেক্টার) চেক করা
+                if len(msg) > 4000:
+                    msg = msg[:3950] + "\n\n...(টেক্সট বড় হওয়ায় কিছু অংশ বাদ দেওয়া হয়েছে)"
 
-                # লোকাল ফাইল মুছে ফেলা
-                if os.path.exists(file_name):
-                    os.remove(file_name)
+                await update.message.reply_text(msg, parse_mode='Markdown')
             else:
-                await update.message.reply_text("দুঃখিত, এই ট্র্যাকিং নম্বরের বিপরীতে কোনো ডাটা পাওয়া যায়নি।")
+                await update.message.reply_text("দুঃখিত, এই ট্র্যাকিং নম্বরের বিপরীতে কোনো ডাটা পাওয়া যায়নি। সঠিক নম্বর দিয়েছেন কি না চেক করুন।")
         else:
             await update.message.reply_text(f"সার্ভার ত্রুটি কোড: {response.status_code}")
 
